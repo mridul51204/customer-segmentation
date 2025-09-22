@@ -2,6 +2,8 @@
 headless = true
 enableXsrfProtection = true
 enableCORS = false
+fileWatcherType = "poll"    # ← add this
+runOnSave = false           # ← add this
 
 [theme]
-base = "light"      # change to "dark" if you prefer
+base = "light"
