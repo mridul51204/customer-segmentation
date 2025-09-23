@@ -1,26 +1,42 @@
-# app/app.py (top)
-import os, sys
-ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if ROOT_DIR not in sys.path:
-    sys.path.insert(0, ROOT_DIR)
 
-from src.data_prep import (
-    clean_transactions, infer_column_map, apply_column_map,
-    REQUIRED_COLUMNS, OPTIONAL_COLUMNS
-)
-from src.feature_engineering import build_customer_features
-from src.clustering import (
-    get_core_feature_columns, scale_features,
-    kmeans_with_silhouette, pca_project
-)
-from src.insights import build_insights_table
-from src.clustering import (
-    get_core_feature_columns,
-    scale_features,
-    kmeans_with_silhouette,
-    pca_project,
-)
-from src.insights import build_insights_table
+# Load ../src modules by file path so imports work on Streamlit Cloud
+import os, sys, importlib.util
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+def _load(mod_name: str, rel_path: str):
+    path = os.path.join(ROOT_DIR, rel_path)
+    spec = importlib.util.spec_from_file_location(mod_name, path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)  # type: ignore[attr-defined]
+    return mod
+
+# src modules
+dp  = _load("src.data_prep",          "src/data_prep.py")
+fe  = _load("src.feature_engineering","src/feature_engineering.py")
+cl  = _load("src.clustering",         "src/clustering.py")
+ins = _load("src.insights",           "src/insights.py")
+
+# re-exported names (so the rest of your code stays the same)
+clean_transactions = dp.clean_transactions
+infer_column_map   = dp.infer_column_map
+apply_column_map   = dp.apply_column_map
+REQUIRED_COLUMNS   = dp.REQUIRED_COLUMNS
+OPTIONAL_COLUMNS   = dp.OPTIONAL_COLUMNS
+
+build_customer_features = fe.build_customer_features
+
+get_core_feature_columns   = cl.get_core_feature_columns
+scale_features             = cl.scale_features
+kmeans_with_silhouette     = cl.kmeans_with_silhouette
+pca_project                = cl.pca_project
+
+build_insights_table = ins.build_insights_table
+
+# libs
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+
 
 st.set_page_config(page_title="Customer Segmentation & Insights (Modular)", layout="wide")
 st.title("Customer Segmentation & Insights Dashboard (Modular)")
