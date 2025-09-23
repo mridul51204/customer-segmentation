@@ -1,23 +1,19 @@
-# app/app.py
-
-# --- path setup so we can import from src on Streamlit Cloud ---
+# app/app.py (top)
 import os, sys
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-
 from src.data_prep import (
-    clean_transactions,
-    infer_column_map,
-    apply_column_map,
-    REQUIRED_COLUMNS,
-    OPTIONAL_COLUMNS,
+    clean_transactions, infer_column_map, apply_column_map,
+    REQUIRED_COLUMNS, OPTIONAL_COLUMNS
 )
 from src.feature_engineering import build_customer_features
+from src.clustering import (
+    get_core_feature_columns, scale_features,
+    kmeans_with_silhouette, pca_project
+)
+from src.insights import build_insights_table
 from src.clustering import (
     get_core_feature_columns,
     scale_features,
