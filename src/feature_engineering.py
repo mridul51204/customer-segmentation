@@ -4,9 +4,18 @@ import numpy as np
 
 def build_customer_features(trans: pd.DataFrame) -> pd.DataFrame:
     t = trans.copy()
+
+    # Guard: ensure canonical columns after cleaning/mapping
+    required = {"InvoiceNo", "InvoiceDate"}
+    missing = required - set(t.columns)
+    if missing:
+        raise ValueError(f"Required columns missing after cleaning: {missing}")
+
+    # Fallback key if dataset lacks CustomerID
     if "CustomerID" not in t.columns:
         t["CustomerID"] = t["InvoiceNo"]
-    t = t.dropna(subset=["InvoiceNo","InvoiceDate"])
+
+    t = t.dropna(subset=["InvoiceNo", "InvoiceDate"])
     snap = (pd.to_datetime(t["InvoiceDate"].max()) + pd.Timedelta(days=1)).normalize()
 
     grp = t.groupby("CustomerID", dropna=True)
@@ -31,6 +40,7 @@ def build_customer_features(trans: pd.DataFrame) -> pd.DataFrame:
         "UniqueProducts": unique_products.values,
     })
 
+    # Country mode per customer → one-hots (if present)
     if "Country" in t.columns:
         modes = (t.dropna(subset=["CustomerID"])
                    .groupby("CustomerID")["Country"]
