@@ -37,6 +37,15 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
+import io
+
+# Cache reading of the uploaded file (fast re-runs)
+@st.cache_data(show_spinner=False)
+def read_uploaded_file(file_bytes: bytes, filename: str) -> pd.DataFrame:
+    name = filename.lower()
+    if name.endswith((".xlsx", ".xls")):
+        return pd.read_excel(io.BytesIO(file_bytes), engine="openpyxl")
+    return pd.read_csv(io.BytesIO(file_bytes))
 
 st.set_page_config(page_title="Customer Segmentation & Insights (Modular)", layout="wide")
 st.title("Customer Segmentation & Insights Dashboard (Modular)")
@@ -64,14 +73,11 @@ if file is None:
 # Read file robustly
 # ----------------------------
 try:
-    name = file.name.lower()
-    if name.endswith((".xlsx", ".xls")):
-        raw = pd.read_excel(file, engine="openpyxl")
-    else:
-        raw = pd.read_csv(file)
+    raw = read_uploaded_file(file.getbuffer(), file.name)
 except Exception as e:
     st.error(f"Failed to read file: {e}")
     st.stop()
+
 
 st.subheader("Raw preview")
 st.dataframe(raw.head(10), use_container_width=True)
@@ -104,25 +110,53 @@ st.caption("Preview after applying mapping")
 st.dataframe(raw_mapped.head(8), use_container_width=True)
 
 # ----------------------------
-# Clean + feature engineering
+# Clean + feature engineering (cached)
 # ----------------------------
-with st.spinner("Cleaning & feature engineering..."):
-    tx = clean_transactions(raw, column_map={k: v for k, v in mapping.items() if v})
+@st.cache_data(show_spinner=False)
+def clean_and_featurize(raw_df: pd.DataFrame, mapping: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+    tx = clean_transactions(raw_df, column_map=mapping)
     feats = build_customer_features(tx)
+    return tx, feats
 
+with st.spinner("Cleaning & feature engineering..."):
+    tx, feats = clean_and_featurize(
+        raw_mapped,
+        {k: v for k, v in mapping.items() if v}
+    )
+
+# ---- QC snapshot + downloads ----
+st.subheader("Quality snapshot")
+c1, c2, c3, c4 = st.columns(4)
+raw_rows = len(raw_mapped)
+clean_rows = len(tx)
+drop_pct = (raw_rows - clean_rows) / max(raw_rows, 1) * 100
+date_min = tx["InvoiceDate"].min() if "InvoiceDate" in tx.columns else None
+date_max = tx["InvoiceDate"].max() if "InvoiceDate" in tx.columns else None
+c1.metric("Rows (raw → clean)", f"{raw_rows:,} → {clean_rows:,}", f"-{drop_pct:.1f}%")
+c2.metric("Customers", f"{feats.shape[0]:,}")
+c3.metric("Date start", str(date_min.date()) if date_min is not None else "—")
+c4.metric("Date end", str(date_max.date()) if date_max is not None else "—")
+
+d1, d2 = st.columns(2)
+with d1:
+    st.download_button("⬇️ Cleaned transactions CSV",
+        tx.to_csv(index=False).encode("utf-8"),
+        file_name="transactions_clean.csv", mime="text/csv")
+with d2:
+    st.download_button("⬇️ Customer features CSV",
+        feats.to_csv(index=False).encode("utf-8"),
+        file_name="customers_features.csv", mime="text/csv")
+
+# ---- Customer features preview + core features ----
 st.subheader("Customer Features")
 st.write(f"Shape: {feats.shape}")
 st.dataframe(feats.head(10), use_container_width=True)
 
 core_cols = get_core_feature_columns(feats)
 if len(core_cols) < 3 or feats.shape[0] < max(10, 2 * k_min):
-    st.warning(
-        "Dataset looks small or missing key features. Consider widening k-range or ensuring enough customers."
-    )
+    st.warning("Dataset looks small or missing key features. Consider widening k-range or ensuring enough customers.")
 
-# ----------------------------
-# Scale + cluster (auto k by silhouette)
-# ----------------------------
+# ---- Scale + cluster ----
 X_scaled, _ = scale_features(feats, core_cols)
 with st.spinner("Selecting k via silhouette & clustering..."):
     best = kmeans_with_silhouette(X_scaled, k_min=k_min, k_max=k_max)
@@ -132,6 +166,7 @@ with st.spinner("Selecting k via silhouette & clustering..."):
     feats["Cluster"] = best["labels"]
 
 st.success(f"Selected k = {best['k']}  |  silhouette = {best['score']:.3f}")
+
 
 # ----------------------------
 # Profiles, charts, insights
