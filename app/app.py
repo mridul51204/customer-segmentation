@@ -272,12 +272,13 @@ def build_insights_table(profile_df: pd.DataFrame) -> tuple[pd.DataFrame, Dict[i
 # I/O
 # ----------------------------
 @st.cache_data(show_spinner=False)
-def read_uploaded_file(file_bytes: bytes, filename: str) -> pd.DataFrame:
+def read_uploaded_file(_file_bytes: bytes, filename: str) -> pd.DataFrame:
+    """Leading underscore in _file_bytes prevents Streamlit from hashing the raw memoryview."""
     name = filename.lower()
     if name.endswith((".xlsx", ".xls")):
-        # openpyxl required in requirements.txt
-        return pd.read_excel(io.BytesIO(file_bytes), engine="openpyxl")
-    return pd.read_csv(io.BytesIO(file_bytes))
+        import io
+        return pd.read_excel(io.BytesIO(_file_bytes), engine="openpyxl")
+    return pd.read_csv(io.BytesIO(_file_bytes))
 
 # ----------------------------
 # UI starts here
