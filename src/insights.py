@@ -2,20 +2,48 @@ from __future__ import annotations
 import pandas as pd
 
 def label_clusters(profile: pd.DataFrame) -> dict:
-    q = profile[["RecencyDays","Frequency","Monetary","TenureDays"]].quantile([0.33,0.66])
+    """
+    Assign human-readable labels to clusters using quantile thresholds.
+    Safe if some columns (e.g., TenureDays) are missing or K is small.
+    Expects profile indexed by cluster with columns: RecencyDays, Frequency, Monetary, optional TenureDays.
+    """
+    prof = profile.copy()
+
+    # keep only numeric columns we use and that exist
+    cols = [c for c in ["RecencyDays", "Frequency", "Monetary", "TenureDays"] if c in prof.columns]
+    if not {"RecencyDays", "Frequency", "Monetary"}.issubset(cols):
+        # minimal set not present → default to "Regulars"
+        return {cid: "Mid-Tier Regulars" for cid in prof.index}
+
+    # quantiles with NaN-safe fallback
+    q = prof[cols].quantile([0.33, 0.66], numeric_only=True).fillna(method="ffill").fillna(method="bfill")
+
     names = {}
-    for cid, row in profile.iterrows():
-        if (row["Monetary"] >= q.loc[0.66,"Monetary"]) and (row["Frequency"] >= q.loc[0.66,"Frequency"]) and (row["RecencyDays"] <= q.loc[0.33,"RecencyDays"]):
-            names[cid] = "High-Value Loyalists"
-        elif (row["RecencyDays"] >= q.loc[0.66,"RecencyDays"]) and (row["Monetary"] >= q.loc[0.33,"Monetary"]):
-            names[cid] = "Churn Risk (Lapsed Value)"
-        elif (row["Frequency"] <= q.loc[0.33,"Frequency"]) and (row["Monetary"] <= q.loc[0.33,"Monetary"]):
-            names[cid] = "Low-Spend Infrequents"
-        elif (row["TenureDays"] <= q.loc[0.33,"TenureDays"]):
-            names[cid] = "New Customers"
+    for cid, row in prof.iterrows():
+        R, F, M = row.get("RecencyDays", float("nan")), row.get("Frequency", float("nan")), row.get("Monetary", float("nan"))
+        T = row.get("TenureDays", float("nan"))
+
+        # booleans with NaN-safe comparisons
+        hi_M = (pd.notna(M) and M >= q.loc[0.66, "Monetary"])
+        hi_F = (pd.notna(F) and F >= q.loc[0.66, "Frequency"])
+        low_R = (pd.notna(R) and R <= q.loc[0.33, "RecencyDays"])
+        hi_R  = (pd.notna(R) and R >= q.loc[0.66, "RecencyDays"])
+        low_T = ("TenureDays" in q.columns) and pd.notna(T) and T <= q.loc[0.33, "TenureDays"]
+
+        if hi_M and hi_F and low_R:
+            label = "High-Value Loyalists"
+        elif hi_R and (pd.notna(M) and M >= q.loc[0.33, "Monetary"]):
+            label = "Churn Risk (Lapsed Value)"
+        elif (pd.notna(F) and F <= q.loc[0.33, "Frequency"]) and (pd.notna(M) and M <= q.loc[0.33, "Monetary"]):
+            label = "Low-Spend Infrequents"
+        elif low_T:
+            label = "New Customers"
         else:
-            names[cid] = "Mid-Tier Regulars"
+            label = "Mid-Tier Regulars"
+
+        names[cid] = label
     return names
+
 
 def recommendations_for(label: str) -> list[str]:
     if label == "High-Value Loyalists":
@@ -30,22 +58,28 @@ def recommendations_for(label: str) -> list[str]:
 
 def build_insights_table(profile: pd.DataFrame):
     names = label_clusters(profile)
-    profile = profile.copy()
-    profile["Label"] = profile.index.map(names)
+    prof = profile.copy()
+    prof["Label"] = prof.index.map(names)
+
+    if "Count" not in prof.columns:
+        # best-effort fallback: use a 0/unknown count
+        prof["Count"] = 0
+
     rows = []
-    for cid, row in profile.iterrows():
+    for cid, row in prof.iterrows():
         recs = recommendations_for(row["Label"])
         rows.append({
             "Cluster": int(cid),
             "Label": row["Label"],
-            "Customers": int(row["Count"]),
-            "Monetary↑": round(row["Monetary"], 2),
-            "RecencyDays": round(row["RecencyDays"], 1),
-            "Frequency": round(row["Frequency"], 2),
+            "Customers": int(row["Count"]) if pd.notna(row["Count"]) else 0,
+            "Monetary↑": round(float(row.get("Monetary", float("nan"))), 2),
+            "RecencyDays": round(float(row.get("RecencyDays", float("nan"))), 1),
+            "Frequency": round(float(row.get("Frequency", float("nan"))), 2),
             "Top actions": " | ".join(recs[:3]),
         })
     ins_df = pd.DataFrame(rows)
     return ins_df, names
+
 
 # --- Phase 1 helpers (append to src/insights.py) ---
 import numpy as np
